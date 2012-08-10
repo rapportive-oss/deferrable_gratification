@@ -443,6 +443,43 @@ module DeferrableGratification
       def loop_until(condition, &block)
         loop_while(lambda{ |*args| !condition.call *args }, &block)
       end
+
+
+      # TODO should this be a method on Array?
+      # TODO needs docs
+      # TODO this should work for all Enumerables, not just Arrays (i.e. don't
+      # require #empty?).
+      # (Tried an implementation using Enumerable::Enumerator#next catching
+      # StopIteration, but this fails on 1.8.7 with "continuation called across
+      # threads".  Can work around by wrapping in an EM.next_tick.)
+      def inject(array, initial_accum)
+        accum = initial_accum
+        if array.empty?
+          DG.success(accum)
+        else
+          elem = array[0]
+          deferrable = yield accum, elem
+          deferrable.bind! do |next_accum|
+            inject(array.drop(1), next_accum) {|accum, elem| yield accum, elem }
+          end
+        end
+      rescue Exception => e
+        DG.failure(e)
+      end
+
+      # TODO not sure about the name (it's more like Enumerable#map than
+      # Haskell's 'sequence')
+      # TODO should this be a method on Enumerable?
+      # TODO needs docs
+      # TODO this should work for all Enumerables (see comment on #inject)
+      # TODO this can also be implemented using .chain; do so and compare.
+      def sequence(enumerable)
+        inject(enumerable, []) do |successes_so_far, elem|
+          yield(elem).transform do |success|
+            successes_so_far + [success]
+          end
+        end
+      end
     end
   end
 end
